@@ -2,7 +2,7 @@
 * File Name:   main.c
 *
 * Description:
-*  This file provides reference usage of SCB-UART self tests for  PSoC6 MCU and 
+*  This file provides reference usage of SCB-UART self tests for  PSoC6 MCU and
 *  XMC7000 MCU.
 *
 * Related Document: See README.md
@@ -43,6 +43,7 @@
 
 #include "cy_pdl.h"
 #include "cybsp.h"
+#include "cy_retarget_io.h"
 #include "SelfTest.h"
 #include "stdio_user.h"
 #include <stdio.h>
@@ -58,7 +59,7 @@
 *******************************************************************************/
 cy_stc_scb_uart_context_t CYBSP_UART_context;
 cy_stc_scb_uart_context_t CYBSP_DUT_UART_context;
-cy_en_scb_uart_status_t initstatus;
+
 
 /***************************************
 * Function Prototypes
@@ -69,9 +70,9 @@ void SelfTest_UART_SCB_Init(void);
 * Function Name: main
 ********************************************************************************
 * Summary:
-* This is the main function. It configures one SCB instance as an UART and also 
-* a Smart I/O™ to internally connect the TX and RX pins. The function validates 
-* bidirectional communication within the UART interface by transmitting data 
+* This is the main function. It configures one SCB instance as an UART and also
+* a Smart I/O™ to internally connect the TX and RX pins. The function validates
+* bidirectional communication within the UART interface by transmitting data
 * via TX and receiving it back through RX.
 *
 * Parameters:
@@ -85,24 +86,28 @@ int main(void)
 {
     uint16_t idx = 100u;
     uint8_t ret;
-    uint8_t bypassMask;
+    cy_rslt_t result;
 
     /* Initialize the device and board peripherals */
-    init_cycfg_all();
-
-    /* Initialize the UART */
-    initstatus = Cy_SCB_UART_Init(CYBSP_UART_HW, &CYBSP_UART_config, &CYBSP_UART_context);
-
-    /* Initialization failed. Handle error */
-    if(initstatus!=CY_SCB_UART_SUCCESS)
-    {
-        CY_ASSERT(0u);
-    }
-
-    Cy_SCB_UART_Enable(CYBSP_UART_HW);
+    result = cybsp_init();
+    if (result != CY_RSLT_SUCCESS)
+        {
+            CY_ASSERT(0);
+        }
 
     /* Enable global interrupts */
     __enable_irq();
+
+    /* Initialize retarget-io to use the debug UART port */
+
+    result = cy_retarget_io_init_fc(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX,
+            CYBSP_DEBUG_UART_CTS,CYBSP_DEBUG_UART_RTS,CY_RETARGET_IO_BAUDRATE);
+
+    /* retarget-io init failed. Stop program execution */
+    if (result != CY_RSLT_SUCCESS)
+    {
+        CY_ASSERT(0);
+    }
 
     /* \x1b[2J\x1b[;H - ANSI ESC sequence for clear screen */
     printf("\x1b[2J\x1b[;H");
@@ -111,6 +116,8 @@ int main(void)
     /* Init UART SelfTest*/
     SelfTest_UART_SCB_Init();
 
+#if defined (CYBSP_SMARTIO_UART_LOOPBACK_HW)
+    uint8_t bypassMask;
     /* Configure the Smart I/O block 2 */
     if(CY_SMARTIO_SUCCESS != Cy_SmartIO_Init(CYBSP_SMARTIO_UART_LOOPBACK_HW, &CYBSP_SMARTIO_UART_LOOPBACK_config))
     {
@@ -127,9 +134,10 @@ int main(void)
     Cy_SmartIO_Disable(CYBSP_SMARTIO_UART_LOOPBACK_HW);
     Cy_SmartIO_SetChBypass(CYBSP_SMARTIO_UART_LOOPBACK_HW, bypassMask);
     Cy_SmartIO_Enable(CYBSP_SMARTIO_UART_LOOPBACK_HW);
-
     /* Need to clear buffer after MUX switch */
     Cy_SysLib_DelayUs(BUFF_CLEAR_DELAY);
+#endif
+
     Cy_SCB_UART_ClearRxFifo(CYBSP_DUT_UART_HW);
     Cy_SCB_UART_ClearTxFifo(CYBSP_DUT_UART_HW);
 
@@ -140,11 +148,12 @@ int main(void)
         Cy_SCB_UART_StopRingBuffer(CYBSP_DUT_UART_HW, &CYBSP_DUT_UART_context);
         Cy_SCB_UART_AbortReceive(CYBSP_DUT_UART_HW, &CYBSP_DUT_UART_context);
         Cy_SCB_UART_AbortTransmit(CYBSP_DUT_UART_HW, &CYBSP_DUT_UART_context);
-
+#if defined (CYBSP_SMARTIO_UART_LOOPBACK_HW)
         /* Turn on loopback by disabling the bypass on all the SmartIO configuration for test mode */
         Cy_SmartIO_Disable(CYBSP_SMARTIO_UART_LOOPBACK_HW);
         Cy_SmartIO_SetChBypass(CYBSP_SMARTIO_UART_LOOPBACK_HW, CY_SMARTIO_CHANNEL_NONE);
         Cy_SmartIO_Enable(CYBSP_SMARTIO_UART_LOOPBACK_HW);
+#endif
         /* Clear RX, TX buffers */
         Cy_SCB_UART_ClearRxFifo(CYBSP_DUT_UART_HW);
         Cy_SCB_UART_ClearTxFifo(CYBSP_DUT_UART_HW);
@@ -154,10 +163,12 @@ int main(void)
         /*******************************/
         ret = SelfTest_UART_SCB(CYBSP_DUT_UART_HW);
 
+#if defined (CYBSP_SMARTIO_UART_LOOPBACK_HW)
         /* Turn off loopback by enabling the bypass on all the SmartIO configuration for normal mode */
         Cy_SmartIO_Disable(CYBSP_SMARTIO_UART_LOOPBACK_HW);
         Cy_SmartIO_SetChBypass(CYBSP_SMARTIO_UART_LOOPBACK_HW, CY_SMARTIO_CHANNEL_ALL);
         Cy_SmartIO_Enable(CYBSP_SMARTIO_UART_LOOPBACK_HW);
+#endif
         /* Need to clear buffer after MUX switch */
         Cy_SysLib_DelayUs(BUFF_CLEAR_DELAY);
         Cy_SCB_UART_ClearRxFifo(CYBSP_DUT_UART_HW);
